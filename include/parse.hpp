@@ -1,25 +1,79 @@
 #pragma once
 
+#include "types.hpp"
+#include <charconv>
 #include <expected>
-#include <string>
+#include <optional>
 #include <string_view>
+#include <type_traits>
+#include <typeinfo>
 #include <utility>
 #include <vector>
 
-#include "types.hpp"
-
 namespace stdx::details {
 
-// здесь ваш код
-
-// Функция для парсинга значения с учетом спецификатора формата
 template <typename T>
-std::expected<T, scan_error> parse_value_with_format(std::string_view input, std::string_view fmt) {
-    // здесь ваш код
+    requires(std::is_same_v<type<T>, std::string>)
+std::optional<type<T>> parse_value(std::string_view input) {
+    return std::string(input);
+}
+
+template <typename T>
+    requires(std::is_same_v<type<T>, std::string_view>)
+std::optional<type<T>> parse_value(std::string_view input) {
+    return input;
+}
+
+template <typename T>
+    requires(std::is_integral_v<type<T>> || std::is_floating_point_v<type<T>>)
+std::optional<type<T>> parse_value(std::string_view input) {
+    type<T> value;
+    if (std::from_chars(input.begin(), input.begin() + input.size(), value).ec == std::errc{}) {
+        return value;
+    }
+    return std::nullopt;
+}
+
+template <typename T>
+std::expected<type<T>, scan_error> parse_value_with_format(std::string_view input, std::string_view fmt) {
+    auto returnError = [fmt]() {
+        return std::unexpected(scan_error{"parse_value_with_format: type " + std::string(typeid(type<T>).name()) +
+                                          " is different from " + std::string(fmt)});
+    };
+
+    if (!fmt.empty()) {
+        if constexpr (std::is_integral_v<type<T>>) {
+            if constexpr (std::is_signed_v<type<T>>) {
+                if (fmt != "%d") {
+                    return returnError();
+                }
+            } else {
+                if (fmt != "%u") {
+                    return returnError();
+                }
+            }
+        } else if constexpr (std::is_floating_point_v<type<T>>) {
+            if (fmt != "%f") {
+                return returnError();
+            }
+        } else if constexpr (std::is_same_v<type<T>, std::string> || std::is_same_v<type<T>, std::string_view>) {
+            if (fmt != "%s") {
+                return returnError();
+            }
+        } else {
+            return returnError();
+        }
+    }
+
+    const auto res = parse_value<type<T>>(input);
+    if (!res) {
+        return std::unexpected(scan_error{"parse_value_with_format: error on parse " + std::string(input) + " to " +
+                                          std::string(typeid(type<T>).name())});
+    }
+    return res.value();
 }
 
 // Функция для проверки корректности входных данных и выделения из обеих строк интересующих данных для парсинга
-template <typename... Ts>
 std::expected<std::pair<std::vector<std::string_view>, std::vector<std::string_view>>, scan_error>
 parse_sources(std::string_view input, std::string_view format) {
     std::vector<std::string_view> format_parts;  // Части формата между {}
@@ -70,4 +124,4 @@ parse_sources(std::string_view input, std::string_view format) {
     return std::pair{format_parts, input_parts};
 }
 
-} // namespace stdx::details
+}  // namespace stdx::details
